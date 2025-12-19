@@ -1,6 +1,6 @@
 import numpy as np
 import joblib
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import load_model # type: ignore
 from utils.preprocess import prepare_dataframe
 from utils.metrics import mape
 
