@@ -4,6 +4,19 @@
 
 ---
 
+## 🎥 Demo Video
+
+[Watch the demo](https://youtu.be/TsfV7JxbE3E)
+
+- Quick highlights:
+   - End-to-end prediction flow (upload → configure → predict → visualize)
+   - LSTM vs GM(1,1) comparison with MAPE
+   - Interactive chart with actual vs predicted prices
+   - Clean, responsive UI built with React + Vite
+
+
+---
+
 ## 📌 Overview
 
 Gold Price AI Predictor is a full-stack web application that combines machine learning and time-series forecasting to predict gold prices. The application features two complementary models:
