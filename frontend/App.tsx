@@ -25,7 +25,7 @@ import {
 import { PredictionModel, GoldDataPoint, PredictionResult, FileData } from './types';
 //import { analyzeGoldPrices } from './services/geminiService';
 import { predictLSTMFromBackend } from './services/predictService';
-import { runGM11 } from './utils/greyModel';
+import { runGM11, runGM11TestPredict } from './utils/greyModel';
 
 const App: React.FC = () => {
   const [fileData, setFileData] = useState<FileData | null>(null);
@@ -118,42 +118,97 @@ const handlePredict = async () => {
   setError(null);
 
   try {
+    const getLastYear = (data: GoldDataPoint[]) => {
+      const years = data.map(d => new Date(d.date).getFullYear());
+      return Math.max(...years);
+    };
+
+    const splitByLastYear = (data: GoldDataPoint[]) => {
+      const lastYear = getLastYear(data);
+      const train = data.filter(d => new Date(d.date).getFullYear() < lastYear);
+      const test  = data.filter(d => new Date(d.date).getFullYear() === lastYear);
+      return { lastYear, train, test };
+    };
+
     // GM11 - local
     if (selectedModel === PredictionModel.GM11) {
-      const forecast = runGM11(fileData.parsed, 10);
+      const { lastYear, train, test } = splitByLastYear(fileData.parsed);
+
+      if (train.length < 4) {
+        throw new Error("Dữ liệu train quá ít cho GM(1,1)");
+      }
+      if (test.length === 0) {
+        throw new Error("Không có dữ liệu test (năm cuối)");
+      }
+
+      // Predict for test dates using model fitted on train only
+      const forecast = runGM11TestPredict(train, test);
+
+      // Map test actual data
+      const testActual = test.map(p => ({
+        date: p.date,
+        price: p.price,
+        isPrediction: false,
+      }));
+
+      // Calculate trend
+      const lastActual = test[test.length - 1].price;
+      const lastPred = forecast[forecast.length - 1].price;
+      const trend = lastPred > lastActual ? "up" : lastPred < lastActual ? "down" : "flat";
+
+      // Simple accuracy estimation
+      const actualPrices = test.map(p => p.price);
+      const predPrices = forecast.map(p => p.price);
+      const errors = actualPrices.map((a, i) => Math.abs(a - predPrices[i]) / a);
+      const avgError = errors.reduce((sum, e) => sum + e, 0) / errors.length;
+      const pseudoAcc = Math.max(0, 1 - avgError);
 
       setResult({
-        historical: fileData.parsed,
+        historical: train,
         forecast,
+        testActual,
         metrics: {
-          trend: "flat",
-          accuracy: 0.7,
+          trend,
+          accuracy: pseudoAcc,
           confidence: 0.7,
         } as any,
       } as any);
 
+      setLoading(false);
       return;
     }
 
     // LSTM - backend
     if (!uploadedFile) throw new Error("Chưa có file upload để gửi backend.");
 
+    const { lastYear, train } = splitByLastYear(fileData.parsed);
+
     const backend = await predictLSTMFromBackend({
       file: uploadedFile,
       dateCol: "Date",
       priceCol: "Price",
       windowSize: 60,
-      testYear: 2022,
+      testYear: lastYear,
     });
 
-    const historical = fileData.parsed;
+    // Use only train data as historical (not full dataset)
+    const historical = train;
 
+    // Map test actual data using backend dates
+    const testActual = backend.dates.map((d: string, i: number) => ({
+      date: d,
+      price: backend.actual[i],
+      isPrediction: false,
+    })) as any;
+
+    // Map predicted data
     const forecast = backend.dates.map((d, i) => ({
       date: d,
       price: backend.predicted[i],
       isPrediction: true,
     })) as any;
 
+    // Calculate trend from test data
     const lastActual = backend.actual[backend.actual.length - 1];
     const lastPred = backend.predicted[backend.predicted.length - 1];
     const trend = lastPred > lastActual ? "up" : lastPred < lastActual ? "down" : "flat";
@@ -164,6 +219,7 @@ const handlePredict = async () => {
     setResult({
       historical,
       forecast,
+      testActual,
       metrics: {
         trend,
         accuracy: pseudoAcc,
@@ -177,24 +233,33 @@ const handlePredict = async () => {
   }
 };
 
+  const predByDate = new Map(
+    (result?.forecast ?? []).map((x: any) => [x.date, x.price])
+  );
+
   const chartData = result
     ? [
+        // Last 60 train points
         ...result.historical.slice(-60).map(p => ({
           date: p.date,
-          actualPrice: p.price,
-          predPrice: null,
+          trainActual: p.price,
+          testActual: null,
+          testPredicted: null,
         })),
-        ...result.forecast.map(p => ({
+        // Test actual & predicted (align by date)
+        ...(result.testActual ?? []).map((p: any) => ({
           date: p.date,
-          actualPrice: null,
-          predPrice: p.price,
+          trainActual: null,
+          testActual: p.price,
+          testPredicted: predByDate.get(p.date) ?? null,
         })),
       ]
     : fileData?.parsed.slice(-60).map(p => ({
         date: p.date,
-        actualPrice: p.price,
-        predPrice: null,
-      })) || [];
+        trainActual: p.price,
+        testActual: null,
+        testPredicted: null,
+      })) || []; // Ensure this line is properly closed
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -357,7 +422,7 @@ const handlePredict = async () => {
               <div className="flex justify-between items-center mb-8">
                 <div>
                   <h3 className="text-lg font-bold text-slate-800">Biểu đồ dự báo</h3>
-                  <p className="text-sm text-slate-500">60 phiên gần nhất và 10 phiên dự báo tiếp theo</p>
+                  <p className="text-sm text-slate-500">60 phiên train gần nhất và dữ liệu test năm {result?.testActual?.[0] ? new Date(result.testActual[0].date).getFullYear() : 'cuối'}</p>
                 </div>
               </div>
 
@@ -365,9 +430,13 @@ const handlePredict = async () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData}>
                     <defs>
-                      <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                      <linearGradient id="colorTrain" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#64748b" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#64748b" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorTestActual" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -392,22 +461,34 @@ const handlePredict = async () => {
                         padding: '12px'
                       }}
                     />
+                    <Legend verticalAlign="top" height={36} />
                     <Area
                       type="monotone"
-                      dataKey="actualPrice"
-                      stroke="#f59e0b"
-                      strokeWidth={3}
-                      fill="url(#colorPrice)"
+                      dataKey="trainActual"
+                      stroke="#64748b"
+                      strokeWidth={2}
+                      fill="url(#colorTrain)"
+                      name="Train (Lịch sử)"
                       connectNulls
                     />
                     <Area
                       type="monotone"
-                      dataKey="predPrice"
+                      dataKey="testActual"
+                      stroke="#3b82f6"
+                      strokeWidth={3}
+                      fill="url(#colorTestActual)"
+                      name="Test Actual"
+                      connectNulls
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="testPredicted"
                       stroke="#f59e0b"
                       strokeWidth={3}
                       fillOpacity={0}
                       connectNulls
                       strokeDasharray="6 6"
+                      name="Test Predicted"
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -417,29 +498,51 @@ const handlePredict = async () => {
             {/* Table */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <div className="p-6 border-b border-slate-100">
-                <h3 className="font-bold text-slate-800">Chi tiết giá dự báo</h3>
+                <h3 className="font-bold text-slate-800">Chi tiết giá dự báo vs Thực tế</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-400">
                     <tr>
-                      <th className="px-6 py-3">Ngày (Dự kiến)</th>
-                      <th className="px-6 py-3">Giá dự báo</th>
-                      <th className="px-6 py-3">Trạng thái</th>
+                      <th className="px-6 py-3">Ngày</th>
+                      <th className="px-6 py-3">Giá Thực Tế (Test)</th>
+                      <th className="px-6 py-3">Giá Dự Báo</th>
+                      <th className="px-6 py-3">Sai Số</th>
+                      <th className="px-6 py-3">Sai Số %</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {result.forecast.map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4 text-sm font-medium text-slate-700">{item.date}</td>
-                        <td className="px-6 py-4 text-sm font-bold text-slate-900">${item.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center px-2 py-1 rounded-md bg-amber-50 text-amber-700 text-[10px] font-bold uppercase ring-1 ring-amber-200">
-                            Dự báo
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {(result.testActual ?? []).map((actual: any, idx: number) => {
+                      const predicted = result.forecast[idx];
+                      const error = predicted ? Math.abs(actual.price - predicted.price) : 0;
+                      const errorPercent = predicted ? (error / actual.price) * 100 : 0;
+                      
+                      return (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-6 py-4 text-sm font-medium text-slate-700">{actual.date}</td>
+                          <td className="px-6 py-4 text-sm font-bold text-blue-600">
+                            ${actual.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-bold text-amber-600">
+                            ${predicted ? predicted.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-medium text-slate-700">
+                            ${error.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-medium">
+                            <span className={`inline-flex items-center px-2 py-1 rounded-md font-bold text-[10px] ${
+                              errorPercent < 5 
+                                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' 
+                                : errorPercent < 10
+                                ? 'bg-yellow-50 text-yellow-700 ring-1 ring-yellow-200'
+                                : 'bg-red-50 text-red-700 ring-1 ring-red-200'
+                            }`}>
+                              {errorPercent.toFixed(2)}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -461,7 +564,7 @@ const handlePredict = async () => {
       </main>
 
       <footer className="bg-white border-t border-slate-200 py-8 px-6 text-center text-sm text-slate-400">
-        <p>&copy; 2024 GoldPriceAI Predictor. Powered by Gemini 3 Pro.</p>
+        <p>&copy; 2025 GoldPriceAI Predictor. Powered by Đỗ Phúc Vũ Hà.</p>
       </footer>
     </div>
   );

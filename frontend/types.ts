@@ -13,6 +13,7 @@ export interface GoldDataPoint {
 export interface PredictionResult {
   historical: GoldDataPoint[];
   forecast: GoldDataPoint[];
+  testActual?: GoldDataPoint[];
   metrics: {
     accuracy: number;
     trend: 'up' | 'down' | 'neutral';
