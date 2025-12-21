@@ -6,3 +6,4 @@ scikit-learn
 joblib
 tensorflow
 plotly
+python-multipart
