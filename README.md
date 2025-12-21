@@ -4,6 +4,14 @@
 
 ---
 
+## 🌐 Live Demo
+
+- **Web App (Vercel)**: https://predict-gold-price.vercel.app
+- **Backend API (Render - Swagger)**: https://predict-gold-backend.onrender.com/docs
+
+> Note: Render free tier may spin down when idle. The first request can take ~30–50 seconds to wake up.
+
+---
 ## 🎥 Demo Video
 
 [Watch the demo](https://youtu.be/TsfV7JxbE3E)
@@ -35,6 +43,18 @@ Users can upload historical gold price data, select a prediction model, and visu
 - 🎯 **Performance Metrics**: MAPE (Mean Absolute Percentage Error) calculation
 - 🎨 **Responsive UI**: Modern React interface with Recharts visualization
 - ⚡ **Fast API**: RESTful backend with FastAPI for quick predictions
+
+---
+
+## 📊 Dataset
+
+This project uses the **Gold Price 10 Years (2013-2023)** dataset from Kaggle:
+- **Source**: [Kaggle - Gold Price Dataset](https://www.kaggle.com/datasets/farzadnekouei/gold-price-10-years-20132023)
+- **Time Period**: 2013-2023 (10 years of historical gold price data)
+- **Format**: CSV with historical gold price records
+- **Location**: `backend/LSTM/Gold Price (2013-2023).csv`
+
+The dataset contains daily gold price information spanning a decade, providing comprehensive historical context for training the LSTM model and testing predictions with real-world market data.
 
 ---
 
@@ -134,7 +154,7 @@ yarn install
 #### Start Backend Server
 ```bash
 cd backend
-python main.py
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 The API will be available at `http://localhost:8000`
 
@@ -161,10 +181,18 @@ yarn build
 ## 🔧 Configuration
 
 ### Backend CORS Settings
-The backend is configured to accept requests from `http://localhost:3000`. Modify `backend/main.py` for different frontend URLs.
+CORS origins are configured via `FRONTEND_ORIGIN` (comma-separated). If not set, the backend defaults to `http://localhost:3000` for local development.
 
 ### Frontend API Endpoint
 Update the API base URL in `frontend/services/predictService.ts` if running on different ports.
+
+### Environment Variables
+
+**Frontend (Vercel):**
+- `VITE_API_BASE_URL=https://predict-gold-backend.onrender.com`
+
+**Backend (Render):**
+- `FRONTEND_ORIGIN=https://predict-gold-price.vercel.app`
 
 ---
 
