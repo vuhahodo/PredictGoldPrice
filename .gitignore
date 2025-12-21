@@ -3,9 +3,7 @@ __pycache__/
 venv/
 *.pyc
 
-# ML artifacts
-*.h5
-*.pkl
+
 
 # Node
 frontend/node_modules/
