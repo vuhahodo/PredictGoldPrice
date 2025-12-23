@@ -130,6 +130,14 @@ def predict_lstm(df, date_col: str, price_col: str, window_size: int, test_year:
     train_df = df.loc[~is_test].reset_index(drop=True)
     test_df  = df.loc[is_test].reset_index(drop=True)
 
+    # Basic validation before loading heavy model artifacts
+    if len(test_df) == 0:
+        raise ValueError(f"Invalid input: no data for test year {test_year}.")
+    if len(test_df) < 5:
+        raise ValueError(
+            f"Invalid input: test set too small ({len(test_df)} rows) for year {test_year}."
+        )
+
     model, scaler = load_artifacts()
     
     # ✅ Auto-detect window size from model if not properly set
@@ -144,12 +152,6 @@ def predict_lstm(df, date_col: str, price_col: str, window_size: int, test_year:
     if len(train_df) < window_size:
         raise ValueError(
             f"Invalid input: train set too small ({len(train_df)} rows) for window size {window_size}."
-        )
-    if len(test_df) == 0:
-        raise ValueError(f"Invalid input: no data for test year {test_year}.")
-    if len(test_df) < 5:
-        raise ValueError(
-            f"Invalid input: test set too small ({len(test_df)} rows) for year {test_year}."
         )
 
     # Scale using pretrained scaler
