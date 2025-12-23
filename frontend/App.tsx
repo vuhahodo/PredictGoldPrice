@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   LineChart, 
   Line, 
@@ -25,7 +25,7 @@ import {
 import { PredictionModel, GoldDataPoint, PredictionResult, FileData } from './types';
 //import { analyzeGoldPrices } from './services/geminiService';
 import { predictLSTMFromBackend } from './services/predictService';
-import { trainLSTMFromBackend } from './services/trainService';
+import { startLSTMTrainJob, getLSTMTrainJobStatus } from './services/trainService';
 import { runGM11, runGM11TestPredict } from './utils/greyModel';
 
 type TrainOutcome = {
@@ -47,6 +47,9 @@ const App: React.FC = () => {
   const [retrainLoading, setRetrainLoading] = useState(false);
   const [retrainError, setRetrainError] = useState<string | null>(null);
   const [retrainResult, setRetrainResult] = useState<TrainOutcome | null>(null);
+  const [retrainJobId, setRetrainJobId] = useState<string | null>(null);
+  const [retrainStatus, setRetrainStatus] = useState<'pending' | 'running' | 'done' | 'error' | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
   // Helper to parse CSV lines that contain quotes and commas
   const parseCSVLine = (line: string) => {
     const result = [];
@@ -131,43 +134,91 @@ const App: React.FC = () => {
     setRetrainFile(file);
     setRetrainResult(null);
     setRetrainError(null);
+    setRetrainJobId(null);
+    setRetrainStatus(null);
   };
+
+  const buildTrainOutcome = useCallback((response: Record<string, unknown>) => {
+    const lossValue = response["loss"];
+    const mapeValue = response["mape"] ?? response["MAPE"];
+    const metadataValue = response["metadata"];
+
+    return {
+      loss: typeof lossValue === "number" ? lossValue : undefined,
+      mape: typeof mapeValue === "number" ? mapeValue : undefined,
+      metadata:
+        metadataValue && typeof metadataValue === "object"
+          ? (metadataValue as Record<string, unknown>)
+          : undefined,
+      raw: response,
+    };
+  }, []);
+
+  const pollRetrainStatus = useCallback(async (jobId: string) => {
+    try {
+      const statusResponse = await getLSTMTrainJobStatus(jobId);
+      setRetrainStatus(statusResponse.status);
+
+      if (statusResponse.status === "done") {
+        if (statusResponse.result && typeof statusResponse.result === "object") {
+          setRetrainResult(buildTrainOutcome(statusResponse.result));
+        } else {
+          setRetrainResult(buildTrainOutcome({ result: statusResponse.result }));
+        }
+        setRetrainError(null);
+        setRetrainLoading(false);
+        return;
+      }
+
+      if (statusResponse.status === "error") {
+        setRetrainError(statusResponse.error || "Đã xảy ra lỗi khi retrain.");
+        setRetrainLoading(false);
+        return;
+      }
+
+      pollTimeoutRef.current = window.setTimeout(() => {
+        void pollRetrainStatus(jobId);
+      }, 2000);
+    } catch (err: any) {
+      setRetrainError(err?.message || "Đã xảy ra lỗi khi retrain.");
+      setRetrainLoading(false);
+    }
+  }, [buildTrainOutcome]);
 
   const handleRetrain = async () => {
     if (!retrainFile) return;
     setRetrainLoading(true);
     setRetrainError(null);
     setRetrainResult(null);
+    setRetrainStatus("pending");
+    if (pollTimeoutRef.current) {
+      window.clearTimeout(pollTimeoutRef.current);
+    }
 
     try {
-      const response = await trainLSTMFromBackend({
+      const response = await startLSTMTrainJob({
         file: retrainFile,
         dateCol: "Date",
         priceCol: "Price",
         windowSize: 60,
       });
-
-      const responseObj: Record<string, unknown> =
-        response && typeof response === "object" ? response : { result: response };
-      const lossValue = responseObj["loss"];
-      const mapeValue = responseObj["mape"] ?? responseObj["MAPE"];
-      const metadataValue = responseObj["metadata"];
-
-      setRetrainResult({
-        loss: typeof lossValue === "number" ? lossValue : undefined,
-        mape: typeof mapeValue === "number" ? mapeValue : undefined,
-        metadata:
-          metadataValue && typeof metadataValue === "object"
-            ? (metadataValue as Record<string, unknown>)
-            : undefined,
-        raw: responseObj,
-      });
+      setRetrainJobId(response.job_id);
+      setRetrainStatus("running");
+      void pollRetrainStatus(response.job_id);
     } catch (err: any) {
       setRetrainError(err?.message || "Đã xảy ra lỗi khi retrain.");
-    } finally {
+      setRetrainStatus("error");
       setRetrainLoading(false);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (pollTimeoutRef.current) {
+        window.clearTimeout(pollTimeoutRef.current);
+      }
+    };
+  }, []);
 
 const handlePredict = async () => {
   if (!fileData) return;
@@ -449,16 +500,27 @@ const handlePredict = async () => {
             <div className="flex flex-col justify-center rounded-xl border border-slate-100 bg-slate-50 p-4">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-tighter">Trạng thái</span>
               <span className={`mt-2 text-sm font-semibold ${
-                retrainLoading ? 'text-amber-600' : retrainError ? 'text-rose-600' : retrainResult ? 'text-emerald-600' : 'text-slate-500'
+                retrainStatus === 'pending' || retrainStatus === 'running'
+                  ? 'text-amber-600'
+                  : retrainStatus === 'error'
+                    ? 'text-rose-600'
+                    : retrainStatus === 'done'
+                      ? 'text-emerald-600'
+                      : 'text-slate-500'
               }`}>
-                {retrainLoading
-                  ? 'Đang huấn luyện...'
-                  : retrainError
-                    ? 'Thất bại'
-                    : retrainResult
-                      ? 'Thành công'
-                      : 'Chưa chạy'}
+                {retrainStatus === 'pending'
+                  ? 'Đang xếp hàng...'
+                  : retrainStatus === 'running'
+                    ? 'Đang huấn luyện...'
+                    : retrainStatus === 'error'
+                      ? 'Thất bại'
+                      : retrainStatus === 'done'
+                        ? 'Thành công'
+                        : 'Chưa chạy'}
               </span>
+              {retrainJobId && (
+                <p className="mt-1 text-[11px] text-slate-400 break-all">Job ID: {retrainJobId}</p>
+              )}
               {retrainError && <p className="mt-2 text-xs text-rose-500">{retrainError}</p>}
             </div>
           </div>

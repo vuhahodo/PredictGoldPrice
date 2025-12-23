@@ -52,7 +52,7 @@ async function parseError(res: Response) {
   }
 }
 
-export async function trainLSTMFromBackend(params: {
+export async function startLSTMTrainJob(params: {
   file: File;
   dateCol: string;
   priceCol: string;
@@ -78,5 +78,25 @@ export async function trainLSTMFromBackend(params: {
     throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
   }
 
-  return res.json();
+  return res.json() as Promise<{ job_id: string }>;
+}
+
+export async function getLSTMTrainJobStatus(jobId: string, signal?: AbortSignal) {
+  const base = requireApiBase();
+  const res = await fetch(`${base}/train/lstm/status/${jobId}`, {
+    method: "GET",
+    signal,
+  });
+
+  if (!res.ok) {
+    const detail = await parseError(res);
+    throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
+  }
+
+  return res.json() as Promise<{
+    job_id: string;
+    status: "pending" | "running" | "done" | "error";
+    result?: Record<string, unknown>;
+    error?: string;
+  }>;
 }
