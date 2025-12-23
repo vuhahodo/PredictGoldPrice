@@ -16,6 +16,14 @@ SCALER = None
 ARTIFACT_LOCK = threading.RLock()
 
 
+def get_model_window_size(model):
+    """Extract window size from model's input shape."""
+    ish = model.input_shape
+    if isinstance(ish, list):
+        ish = ish[0]
+    return int(ish[1])
+
+
 def load_artifacts():
     global MODEL, SCALER
     with ARTIFACT_LOCK:
@@ -115,6 +123,13 @@ def predict_lstm(df, date_col: str, price_col: str, window_size: int, test_year:
     train_df = df.loc[~is_test].reset_index(drop=True)
     test_df  = df.loc[is_test].reset_index(drop=True)
 
+    model, scaler = load_artifacts()
+    
+    # ✅ Auto-detect window size from model if not properly set
+    model_window_size = get_model_window_size(model)
+    if window_size != model_window_size:
+        window_size = model_window_size
+
     if len(train_df) < window_size:
         raise ValueError(
             f"Invalid input: train set too small ({len(train_df)} rows) for window size {window_size}."
@@ -125,8 +140,6 @@ def predict_lstm(df, date_col: str, price_col: str, window_size: int, test_year:
         raise ValueError(
             f"Invalid input: test set too small ({len(test_df)} rows) for year {test_year}."
         )
-
-    model, scaler = load_artifacts()
 
     # Scale using pretrained scaler
     train_scaled = scaler.transform(train_df[[price_col]].values)
