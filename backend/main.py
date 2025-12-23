@@ -39,12 +39,12 @@ async def predict_lstm_api(
     try:
         df = pd.read_csv(file.file)
         return predict_lstm(df, date_col, price_col, window_size, test_year)
+    except pd.errors.EmptyDataError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid input: empty dataset.",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, OSError, IOError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Unexpected server error while running prediction.",
-        ) from exc
