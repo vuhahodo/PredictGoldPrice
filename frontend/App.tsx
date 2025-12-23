@@ -25,7 +25,15 @@ import {
 import { PredictionModel, GoldDataPoint, PredictionResult, FileData } from './types';
 //import { analyzeGoldPrices } from './services/geminiService';
 import { predictLSTMFromBackend } from './services/predictService';
+import { trainLSTMFromBackend } from './services/trainService';
 import { runGM11, runGM11TestPredict } from './utils/greyModel';
+
+type TrainOutcome = {
+  loss?: number;
+  mape?: number;
+  metadata?: Record<string, unknown>;
+  raw: Record<string, unknown>;
+};
 
 const App: React.FC = () => {
   const [fileData, setFileData] = useState<FileData | null>(null);
@@ -35,6 +43,10 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   //Thêm useState LSTML
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [retrainFile, setRetrainFile] = useState<File | null>(null);
+  const [retrainLoading, setRetrainLoading] = useState(false);
+  const [retrainError, setRetrainError] = useState<string | null>(null);
+  const [retrainResult, setRetrainResult] = useState<TrainOutcome | null>(null);
   // Helper to parse CSV lines that contain quotes and commas
   const parseCSVLine = (line: string) => {
     const result = [];
@@ -110,6 +122,51 @@ const App: React.FC = () => {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleRetrainFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setRetrainFile(file);
+    setRetrainResult(null);
+    setRetrainError(null);
+  };
+
+  const handleRetrain = async () => {
+    if (!retrainFile) return;
+    setRetrainLoading(true);
+    setRetrainError(null);
+    setRetrainResult(null);
+
+    try {
+      const response = await trainLSTMFromBackend({
+        file: retrainFile,
+        dateCol: "Date",
+        priceCol: "Price",
+        windowSize: 60,
+      });
+
+      const responseObj: Record<string, unknown> =
+        response && typeof response === "object" ? response : { result: response };
+      const lossValue = responseObj["loss"];
+      const mapeValue = responseObj["mape"] ?? responseObj["MAPE"];
+      const metadataValue = responseObj["metadata"];
+
+      setRetrainResult({
+        loss: typeof lossValue === "number" ? lossValue : undefined,
+        mape: typeof mapeValue === "number" ? mapeValue : undefined,
+        metadata:
+          metadataValue && typeof metadataValue === "object"
+            ? (metadataValue as Record<string, unknown>)
+            : undefined,
+        raw: responseObj,
+      });
+    } catch (err: any) {
+      setRetrainError(err?.message || "Đã xảy ra lỗi khi retrain.");
+    } finally {
+      setRetrainLoading(false);
+    }
   };
 
 const handlePredict = async () => {
@@ -356,6 +413,78 @@ const handlePredict = async () => {
               {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : 'Bắt đầu dự đoán'}
             </button>
           </div>
+        </div>
+
+        <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-5 h-5 text-amber-600" />
+            <h2 className="font-semibold text-slate-800">Retrain mô hình LSTM</h2>
+          </div>
+          <p className="text-sm text-slate-500">
+            Tải lên dữ liệu mới để huấn luyện lại mô hình và nhận thông tin loss/mape/metadata.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+            <label className="group flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 transition-all">
+              <div className="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center">
+                <Upload className="w-8 h-8 text-slate-400 group-hover:text-amber-500 mb-2" />
+                <p className="text-xs text-slate-500 group-hover:text-slate-700 truncate w-full">
+                  {retrainFile ? retrainFile.name : 'Chọn file CSV cho retrain'}
+                </p>
+              </div>
+              <input type="file" className="hidden" accept=".csv" onChange={handleRetrainFileUpload} />
+            </label>
+
+            <button
+              disabled={!retrainFile || retrainLoading}
+              onClick={handleRetrain}
+              className={`w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl font-bold transition-all ${
+                !retrainFile || retrainLoading
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                  : 'bg-amber-500 hover:bg-amber-400 text-white shadow-lg shadow-amber-500/20 active:scale-[0.98]'
+              }`}
+            >
+              {retrainLoading ? <RefreshCw className="w-5 h-5 animate-spin" /> : 'Retrain'}
+            </button>
+
+            <div className="flex flex-col justify-center rounded-xl border border-slate-100 bg-slate-50 p-4">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-tighter">Trạng thái</span>
+              <span className={`mt-2 text-sm font-semibold ${
+                retrainLoading ? 'text-amber-600' : retrainError ? 'text-rose-600' : retrainResult ? 'text-emerald-600' : 'text-slate-500'
+              }`}>
+                {retrainLoading
+                  ? 'Đang huấn luyện...'
+                  : retrainError
+                    ? 'Thất bại'
+                    : retrainResult
+                      ? 'Thành công'
+                      : 'Chưa chạy'}
+              </span>
+              {retrainError && <p className="mt-2 text-xs text-rose-500">{retrainError}</p>}
+            </div>
+          </div>
+
+          {retrainResult && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="rounded-2xl border border-slate-100 p-4">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-tighter">Loss</span>
+                <div className="mt-2 text-lg font-bold text-slate-800">
+                  {typeof retrainResult.loss === 'number' ? retrainResult.loss.toFixed(6) : 'N/A'}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-100 p-4">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-tighter">MAPE</span>
+                <div className="mt-2 text-lg font-bold text-slate-800">
+                  {typeof retrainResult.mape === 'number' ? `${retrainResult.mape.toFixed(4)}%` : 'N/A'}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-100 p-4">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-tighter">Metadata</span>
+                <pre className="mt-2 text-xs text-slate-600 whitespace-pre-wrap break-words">
+                  {JSON.stringify(retrainResult.metadata ?? retrainResult.raw, null, 2)}
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
 
         {error && (
