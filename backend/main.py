@@ -32,6 +32,15 @@ app.add_middleware(
 )
 
 # ================= API =================
+def read_uploaded_csv(file: UploadFile, sep: str | None) -> pd.DataFrame:
+    try:
+        if sep:
+            return pd.read_csv(file.file, encoding="utf-8-sig", sep=sep)
+        return pd.read_csv(file.file, encoding="utf-8-sig")
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid CSV or encoding") from exc
+
+
 @app.post("/predict/lstm")
 async def predict_lstm_api(
     file: UploadFile = File(...),
@@ -39,9 +48,10 @@ async def predict_lstm_api(
     price_col: str = Form(...),
     window_size: int = Form(60),
     test_year: int = Form(2022),
+    sep: str | None = Form(None),
 ):
     try:
-        df = pd.read_csv(file.file)
+        df = read_uploaded_csv(file, sep)
         return predict_lstm(df, date_col, price_col, window_size, test_year)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -66,9 +76,10 @@ async def train_lstm_api(
     lstm_units: int = Form(50),
     dropout: float = Form(0.2),
     learning_rate: float = Form(0.001),
+    sep: str | None = Form(None),
 ):
     try:
-        df = pd.read_csv(file.file)
+        df = read_uploaded_csv(file, sep)
         return train_lstm(
             df,
             date_col,

@@ -81,7 +81,7 @@ export async function predictLSTMFromBackend(params: {
 
   if (!res.ok) {
     const detail = await parseError(res);
-    throw new Error(detail ? `HTTP ${res.status}: ${detail}` : `HTTP ${res.status}`);
+    throw new Error(detail || `HTTP ${res.status}`);
   }
 
   return res.json();
