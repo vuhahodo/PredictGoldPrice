@@ -4,6 +4,7 @@ import pandas as pd
 import os
 
 from models.lstm_service import predict_lstm
+from models.lstm_train import train_lstm
 
 app = FastAPI()
 
@@ -47,4 +48,42 @@ async def predict_lstm_api(
         raise HTTPException(
             status_code=500,
             detail="Unexpected server error while running prediction.",
+        ) from exc
+
+
+@app.post("/train/lstm")
+async def train_lstm_api(
+    file: UploadFile = File(...),
+    date_col: str = Form(...),
+    price_col: str = Form(...),
+    window_size: int = Form(60),
+    test_year: int = Form(2022),
+    epochs: int = Form(20),
+    batch_size: int = Form(32),
+    lstm_units: int = Form(50),
+    dropout: float = Form(0.2),
+    learning_rate: float = Form(0.001),
+):
+    try:
+        df = pd.read_csv(file.file)
+        return train_lstm(
+            df,
+            date_col,
+            price_col,
+            window_size,
+            test_year,
+            epochs,
+            batch_size,
+            lstm_units,
+            dropout,
+            learning_rate,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Unexpected server error while training model.",
         ) from exc
