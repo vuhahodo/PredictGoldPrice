@@ -2,6 +2,7 @@ import numpy as np
 import joblib
 import os
 import threading
+import logging
 from tensorflow.keras.models import load_model  # type: ignore
 from tensorflow.keras.models import Sequential  # type: ignore
 from tensorflow.keras.layers import LSTM, Dense  # type: ignore
@@ -14,6 +15,20 @@ SCALER_PATH = "artifacts/scaler.pkl"
 MODEL = None
 SCALER = None
 ARTIFACT_LOCK = threading.RLock()
+logger = logging.getLogger(__name__)
+
+
+def get_model_window_size(model):
+    """Extract window size from model's input shape."""
+    try:
+        ish = model.input_shape
+        if isinstance(ish, list):
+            ish = ish[0]
+        if ish is None or len(ish) < 2 or ish[1] is None:
+            raise ValueError("Model input shape is invalid or not fully defined")
+        return int(ish[1])
+    except (AttributeError, IndexError, TypeError) as e:
+        raise ValueError(f"Failed to extract window size from model: {e}") from e
 
 
 def load_artifacts():
@@ -115,10 +130,7 @@ def predict_lstm(df, date_col: str, price_col: str, window_size: int, test_year:
     train_df = df.loc[~is_test].reset_index(drop=True)
     test_df  = df.loc[is_test].reset_index(drop=True)
 
-    if len(train_df) < window_size:
-        raise ValueError(
-            f"Invalid input: train set too small ({len(train_df)} rows) for window size {window_size}."
-        )
+    # Basic validation before loading heavy model artifacts
     if len(test_df) == 0:
         raise ValueError(f"Invalid input: no data for test year {test_year}.")
     if len(test_df) < 5:
@@ -127,6 +139,20 @@ def predict_lstm(df, date_col: str, price_col: str, window_size: int, test_year:
         )
 
     model, scaler = load_artifacts()
+    
+    # ✅ Auto-detect window size from model if not properly set
+    model_window_size = get_model_window_size(model)
+    if window_size != model_window_size:
+        logger.warning(
+            f"Window size mismatch: provided={window_size}, model expects={model_window_size}. "
+            f"Auto-correcting to use model's window size: {model_window_size}"
+        )
+        window_size = model_window_size
+
+    if len(train_df) < window_size:
+        raise ValueError(
+            f"Invalid input: train set too small ({len(train_df)} rows) for window size {window_size}."
+        )
 
     # Scale using pretrained scaler
     train_scaled = scaler.transform(train_df[[price_col]].values)
