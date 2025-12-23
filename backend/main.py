@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import os
 
-from models.lstm_service import predict_lstm
+from models.lstm_service import predict_lstm, train_lstm
 
 app = FastAPI()
 
@@ -28,6 +28,36 @@ app.add_middleware(
 )
 
 # ================= API =================
+@app.post("/train/lstm")
+async def train_lstm_api(
+    file: UploadFile = File(...),
+    date_col: str = Form(...),
+    price_col: str = Form(...),
+    window_size: int = Form(60),
+    test_year: int = Form(2022),
+    epochs: int = Form(10),
+    batch_size: int = Form(32),
+):
+    try:
+        df = pd.read_csv(file.file)
+        return train_lstm(
+            df,
+            date_col,
+            price_col,
+            window_size,
+            test_year,
+            epochs=epochs,
+            batch_size=batch_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Unexpected server error while training LSTM.",
+        ) from exc
+
+
 @app.post("/predict/lstm")
 async def predict_lstm_api(
     file: UploadFile = File(...),
