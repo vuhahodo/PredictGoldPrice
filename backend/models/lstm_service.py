@@ -1,7 +1,11 @@
 import numpy as np
 import joblib
 import os
+import threading
 from tensorflow.keras.models import load_model  # type: ignore
+from tensorflow.keras.models import Sequential  # type: ignore
+from tensorflow.keras.layers import LSTM, Dense  # type: ignore
+from sklearn.preprocessing import MinMaxScaler
 from utils.preprocess import prepare_dataframe
 from utils.metrics import mape
 
@@ -9,19 +13,28 @@ MODEL_PATH = "artifacts/lstm_gold.h5"
 SCALER_PATH = "artifacts/scaler.pkl"
 MODEL = None
 SCALER = None
+ARTIFACT_LOCK = threading.RLock()
 
 
 def load_artifacts():
     global MODEL, SCALER
-    if MODEL is None:
-        if not os.path.exists(MODEL_PATH):
-            raise FileNotFoundError(f"Model artifact not found: {MODEL_PATH}")
-        MODEL = load_model(MODEL_PATH)
-    if SCALER is None:
-        if not os.path.exists(SCALER_PATH):
-            raise FileNotFoundError(f"Model artifact not found: {SCALER_PATH}")
-        SCALER = joblib.load(SCALER_PATH)
-    return MODEL, SCALER
+    with ARTIFACT_LOCK:
+        if MODEL is None:
+            if not os.path.exists(MODEL_PATH):
+                raise FileNotFoundError(f"Model artifact not found: {MODEL_PATH}")
+            MODEL = load_model(MODEL_PATH)
+        if SCALER is None:
+            if not os.path.exists(SCALER_PATH):
+                raise FileNotFoundError(f"Model artifact not found: {SCALER_PATH}")
+            SCALER = joblib.load(SCALER_PATH)
+        return MODEL, SCALER
+
+
+def _set_artifacts(model, scaler):
+    global MODEL, SCALER
+    with ARTIFACT_LOCK:
+        MODEL = model
+        SCALER = scaler
 
 
 def make_sequences(values_scaled: np.ndarray, window_size: int):
@@ -32,6 +45,62 @@ def make_sequences(values_scaled: np.ndarray, window_size: int):
     X = np.array(X).reshape(-1, window_size, 1)
     y = np.array(y).reshape(-1, 1)
     return X, y
+
+
+def train_lstm(
+    df,
+    date_col: str,
+    price_col: str,
+    window_size: int,
+    epochs: int = 20,
+    batch_size: int = 32,
+):
+    if date_col not in df.columns:
+        raise ValueError(f"Invalid input: missing column '{date_col}'.")
+    if price_col not in df.columns:
+        raise ValueError(f"Invalid input: missing column '{price_col}'.")
+
+    df = prepare_dataframe(df, date_col, price_col)
+
+    if len(df) < window_size + 1:
+        raise ValueError(
+            f"Invalid input: dataset too small ({len(df)} rows) for window size {window_size}."
+        )
+
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled = scaler.fit_transform(df[[price_col]].values)
+    X_train, y_train = make_sequences(scaled, window_size)
+
+    model = Sequential(
+        [
+            LSTM(64, return_sequences=True, input_shape=(window_size, 1)),
+            LSTM(64),
+            Dense(1),
+        ]
+    )
+    model.compile(optimizer="adam", loss="mean_squared_error")
+    history = model.fit(
+        X_train,
+        y_train,
+        epochs=epochs,
+        batch_size=batch_size,
+        verbose=0,
+    )
+
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+    model.save(MODEL_PATH)
+    joblib.dump(scaler, SCALER_PATH)
+
+    _set_artifacts(model, scaler)
+
+    last_loss = float(history.history["loss"][-1]) if history.history.get("loss") else None
+    return {
+        "train_size": int(len(df)),
+        "window_size": int(window_size),
+        "epochs": int(epochs),
+        "batch_size": int(batch_size),
+        "loss": last_loss,
+    }
 
 
 def predict_lstm(df, date_col: str, price_col: str, window_size: int, test_year: int):
