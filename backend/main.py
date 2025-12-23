@@ -83,7 +83,7 @@ async def train_lstm_api(
     file: UploadFile = File(...),
     date_col: str = Form(...),
     price_col: str = Form(...),
-    window_size: int = Form(60),
+    window_size: int = Form(60),  # For training a new model
     test_year: int = Form(2022),
     epochs: int = Form(20),
     batch_size: int = Form(32),
