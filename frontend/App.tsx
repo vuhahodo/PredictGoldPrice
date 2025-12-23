@@ -144,7 +144,7 @@ const App: React.FC = () => {
         file: retrainFile,
         dateCol: "Date",
         priceCol: "Price",
-        windowSize: 60,
+        windowSize: 180,
       });
 
       const responseObj: Record<string, unknown> =
@@ -244,7 +244,7 @@ const handlePredict = async () => {
       file: uploadedFile,
       dateCol: "Date",
       priceCol: "Price",
-      windowSize: 60,
+      windowSize: 180,
       testYear: lastYear,
     });
 
