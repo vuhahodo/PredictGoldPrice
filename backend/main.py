@@ -1,12 +1,15 @@
+import os
+import logging
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
-import os
 
 from models.lstm_service import predict_lstm
 from models.lstm_train import train_lstm
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 
 # ================= CORS CONFIG =================
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN")
@@ -79,10 +82,19 @@ async def train_lstm_api(
             learning_rate,
         )
     except ValueError as exc:
+        logger.warning("Train LSTM failed due to invalid input: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
+        logger.error("Train LSTM failed due to missing file: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.error("Train LSTM failed to save model artifacts: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save model artifacts: {exc}",
+        ) from exc
     except Exception as exc:
+        logger.exception("Unexpected error while training model: %s", exc)
         raise HTTPException(
             status_code=500,
             detail="Unexpected server error while training model.",
