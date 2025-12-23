@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import os
@@ -36,5 +36,16 @@ async def predict_lstm_api(
     window_size: int = Form(60),
     test_year: int = Form(2022),
 ):
-    df = pd.read_csv(file.file)
+    try:
+        df = pd.read_csv(file.file, encoding="utf-8")
+    except UnicodeDecodeError:
+        try:
+            file.file.seek(0)
+            df = pd.read_csv(file.file, encoding="utf-8-sig")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400, detail="Invalid CSV or encoding error"
+            ) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid CSV or encoding error") from exc
     return predict_lstm(df, date_col, price_col, window_size, test_year)
