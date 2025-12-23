@@ -59,13 +59,33 @@ const App: React.FC = () => {
   const detectColumns = (headers: string[]): {dateCol: string, priceCol: string} => {
     const cleanedHeaders = headers.map(cleanColumnName);
     
+    if (cleanedHeaders.length === 0) {
+      throw new Error("CSV has no columns");
+    }
+    
     // Detect date column: first column containing "date" (case-insensitive) or first column
     let dateCol = cleanedHeaders.find(h => h.toLowerCase().includes('date')) || cleanedHeaders[0];
     
     // Detect price column: column containing "price" or "close" (case-insensitive) or second column
     let priceCol = cleanedHeaders.find(h => 
       h.toLowerCase().includes('price') || h.toLowerCase().includes('close')
-    ) || cleanedHeaders[1] || cleanedHeaders[0];
+    );
+    
+    // If no price column found, use second column (if exists and different from date)
+    if (!priceCol) {
+      if (cleanedHeaders.length >= 2) {
+        priceCol = cleanedHeaders[1];
+      } else {
+        throw new Error("CSV must have at least 2 columns (date and price)");
+      }
+    }
+    
+    // Ensure date and price columns are different
+    if (dateCol === priceCol && cleanedHeaders.length >= 2) {
+      // If they're the same, use first two columns
+      dateCol = cleanedHeaders[0];
+      priceCol = cleanedHeaders[1];
+    }
     
     return { dateCol, priceCol };
   };
@@ -164,11 +184,17 @@ const App: React.FC = () => {
     // Detect columns from retrain file
     const reader = new FileReader();
     reader.onload = (e) => {
-      const content = e.target?.result as string;
+      let content = e.target?.result as string;
+      
+      // Remove UTF-8 BOM if present
+      if (content.charCodeAt(0) === 0xFEFF) {
+        content = content.slice(1);
+      }
+      
       try {
         const lines = content.split(/\r?\n/);
         if (lines.length > 0) {
-          const headerLine = lines[0].charCodeAt(0) === 0xFEFF ? lines[0].slice(1) : lines[0];
+          const headerLine = lines[0];
           const headers = parseCSVLine(headerLine);
           const detected = detectColumns(headers);
           setRetrainDetectedColumns(detected);
