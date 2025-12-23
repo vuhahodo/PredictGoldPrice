@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import os
@@ -36,5 +36,15 @@ async def predict_lstm_api(
     window_size: int = Form(60),
     test_year: int = Form(2022),
 ):
-    df = pd.read_csv(file.file)
-    return predict_lstm(df, date_col, price_col, window_size, test_year)
+    try:
+        df = pd.read_csv(file.file)
+        return predict_lstm(df, date_col, price_col, window_size, test_year)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Unexpected server error while running prediction.",
+        ) from exc

@@ -34,6 +34,16 @@ async function parseError(res: Response) {
   try {
     if (contentType.includes("application/json")) {
       const data = await res.json();
+      if (typeof data === "string") {
+        return data;
+      }
+      if (data && typeof data === "object" && "detail" in data) {
+        const detail = (data as { detail?: unknown }).detail;
+        if (typeof detail === "string") {
+          return detail;
+        }
+        return JSON.stringify(detail);
+      }
       return JSON.stringify(data);
     }
     return await res.text();
