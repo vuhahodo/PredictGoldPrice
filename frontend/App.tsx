@@ -47,6 +47,29 @@ const App: React.FC = () => {
   const [retrainLoading, setRetrainLoading] = useState(false);
   const [retrainError, setRetrainError] = useState<string | null>(null);
   const [retrainResult, setRetrainResult] = useState<TrainOutcome | null>(null);
+  const [detectedColumns, setDetectedColumns] = useState<{dateCol: string, priceCol: string} | null>(null);
+  const [retrainDetectedColumns, setRetrainDetectedColumns] = useState<{dateCol: string, priceCol: string} | null>(null);
+  
+  // Helper to clean column names (remove quotes and trim)
+  const cleanColumnName = (col: string): string => {
+    return col.replace(/^["']|["']$/g, '').trim();
+  };
+
+  // Helper to detect date and price columns from headers
+  const detectColumns = (headers: string[]): {dateCol: string, priceCol: string} => {
+    const cleanedHeaders = headers.map(cleanColumnName);
+    
+    // Detect date column: first column containing "date" (case-insensitive) or first column
+    let dateCol = cleanedHeaders.find(h => h.toLowerCase().includes('date')) || cleanedHeaders[0];
+    
+    // Detect price column: column containing "price" or "close" (case-insensitive) or second column
+    let priceCol = cleanedHeaders.find(h => 
+      h.toLowerCase().includes('price') || h.toLowerCase().includes('close')
+    ) || cleanedHeaders[1] || cleanedHeaders[0];
+    
+    return { dateCol, priceCol };
+  };
+
   // Helper to parse CSV lines that contain quotes and commas
   const parseCSVLine = (line: string) => {
     const result = [];
@@ -85,6 +108,12 @@ const App: React.FC = () => {
       try {
         const lines = content.split(/\r?\n/);
         if (lines.length < 2) throw new Error("File empty or invalid");
+
+        // Parse and detect columns from header
+        const headerLine = lines[0];
+        const headers = parseCSVLine(headerLine);
+        const detected = detectColumns(headers);
+        setDetectedColumns(detected);
 
         const parsed: GoldDataPoint[] = lines
           .slice(1) // Skip header
@@ -131,6 +160,24 @@ const App: React.FC = () => {
     setRetrainFile(file);
     setRetrainResult(null);
     setRetrainError(null);
+
+    // Detect columns from retrain file
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      try {
+        const lines = content.split(/\r?\n/);
+        if (lines.length > 0) {
+          const headerLine = lines[0].charCodeAt(0) === 0xFEFF ? lines[0].slice(1) : lines[0];
+          const headers = parseCSVLine(headerLine);
+          const detected = detectColumns(headers);
+          setRetrainDetectedColumns(detected);
+        }
+      } catch (err) {
+        console.error("Failed to detect columns:", err);
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleRetrain = async () => {
@@ -140,10 +187,11 @@ const App: React.FC = () => {
     setRetrainResult(null);
 
     try {
+      const cols = retrainDetectedColumns || { dateCol: "Date", priceCol: "Price" };
       const response = await trainLSTMFromBackend({
         file: retrainFile,
-        dateCol: "Date",
-        priceCol: "Price",
+        dateCol: cols.dateCol,
+        priceCol: cols.priceCol,
         windowSize: 60,
       });
 
@@ -240,10 +288,11 @@ const handlePredict = async () => {
 
     const { lastYear, train } = splitByLastYear(fileData.parsed);
 
+    const cols = detectedColumns || { dateCol: "Date", priceCol: "Price" };
     const backend = await predictLSTMFromBackend({
       file: uploadedFile,
-      dateCol: "Date",
-      priceCol: "Price",
+      dateCol: cols.dateCol,
+      priceCol: cols.priceCol,
       windowSize: 60,
       testYear: lastYear,
     });
@@ -356,6 +405,13 @@ const handlePredict = async () => {
               </div>
               <input type="file" className="hidden" accept=".csv" onChange={handleFileUpload} />
             </label>
+            {detectedColumns && (
+              <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <p className="text-xs font-semibold text-slate-600 mb-1">Cột phát hiện:</p>
+                <p className="text-xs text-slate-500">📅 Date: <span className="font-medium text-slate-700">{detectedColumns.dateCol}</span></p>
+                <p className="text-xs text-slate-500">💰 Price: <span className="font-medium text-slate-700">{detectedColumns.priceCol}</span></p>
+              </div>
+            )}
           </div>
 
           {/* Model Choice */}
@@ -424,15 +480,24 @@ const handlePredict = async () => {
             Tải lên dữ liệu mới để huấn luyện lại mô hình và nhận thông tin loss/mape/metadata.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
-            <label className="group flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 transition-all">
-              <div className="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center">
-                <Upload className="w-8 h-8 text-slate-400 group-hover:text-amber-500 mb-2" />
-                <p className="text-xs text-slate-500 group-hover:text-slate-700 truncate w-full">
-                  {retrainFile ? retrainFile.name : 'Chọn file CSV cho retrain'}
-                </p>
-              </div>
-              <input type="file" className="hidden" accept=".csv" onChange={handleRetrainFileUpload} />
-            </label>
+            <div className="flex flex-col gap-2">
+              <label className="group flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 transition-all">
+                <div className="flex flex-col items-center justify-center pt-5 pb-6 px-4 text-center">
+                  <Upload className="w-8 h-8 text-slate-400 group-hover:text-amber-500 mb-2" />
+                  <p className="text-xs text-slate-500 group-hover:text-slate-700 truncate w-full">
+                    {retrainFile ? retrainFile.name : 'Chọn file CSV cho retrain'}
+                  </p>
+                </div>
+                <input type="file" className="hidden" accept=".csv" onChange={handleRetrainFileUpload} />
+              </label>
+              {retrainDetectedColumns && (
+                <div className="p-2 bg-slate-50 rounded-lg border border-slate-200">
+                  <p className="text-xs font-semibold text-slate-600 mb-1">Cột phát hiện:</p>
+                  <p className="text-xs text-slate-500">📅 {retrainDetectedColumns.dateCol}</p>
+                  <p className="text-xs text-slate-500">💰 {retrainDetectedColumns.priceCol}</p>
+                </div>
+              )}
+            </div>
 
             <button
               disabled={!retrainFile || retrainLoading}
