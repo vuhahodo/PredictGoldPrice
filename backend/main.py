@@ -52,6 +52,8 @@ async def predict_lstm_api(
 ):
     try:
         df = read_uploaded_csv(file, sep)
+        logger.info(f"Received CSV with columns: {df.columns.tolist()}")
+        logger.info(f"Looking for date_col='{date_col}', price_col='{price_col}'")
         return predict_lstm(df, date_col, price_col, window_size, test_year)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -80,6 +82,8 @@ async def train_lstm_api(
 ):
     try:
         df = read_uploaded_csv(file, sep)
+        logger.info(f"Received CSV with columns: {df.columns.tolist()}")
+        logger.info(f"Looking for date_col='{date_col}', price_col='{price_col}'")
         return train_lstm(
             df,
             date_col,

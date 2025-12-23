@@ -1,7 +1,12 @@
 import pandas as pd
 
+def clean_column_names(df):
+    """Remove quotes (single and double) and strip whitespace from column names"""
+    df.columns = df.columns.str.replace('"', '').str.replace("'", '').str.strip()
+    return df
+
 def prepare_dataframe(df, date_col, price_col):
-    df = df.copy()
+    df = clean_column_names(df.copy())
 
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
 

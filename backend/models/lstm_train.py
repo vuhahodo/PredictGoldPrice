@@ -37,9 +37,11 @@ def train_lstm(
     learning_rate: float,
 ):
     if date_col not in df.columns:
-        raise ValueError(f"Invalid input: missing column '{date_col}'.")
+        available = ', '.join(df.columns.tolist())
+        raise ValueError(f"Invalid input: missing column '{date_col}'. Available columns: [{available}]")
     if price_col not in df.columns:
-        raise ValueError(f"Invalid input: missing column '{price_col}'.")
+        available = ', '.join(df.columns.tolist())
+        raise ValueError(f"Invalid input: missing column '{price_col}'. Available columns: [{available}]")
 
     df = prepare_dataframe(df, date_col, price_col)
 
