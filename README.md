@@ -43,18 +43,55 @@ Users can upload historical gold price data, select a prediction model, and visu
 - 🎯 **Performance Metrics**: MAPE (Mean Absolute Percentage Error) calculation
 - 🎨 **Responsive UI**: Modern React interface with Recharts visualization
 - ⚡ **Fast API**: RESTful backend with FastAPI for quick predictions
+- 🔄 **Model Retraining**: Update LSTM model with new historical data via web interface
+- 🤖 **AI-Powered Insights**: Integration with Google Gemini for intelligent analysis
 
 ---
 
 ## 📊 Dataset
 
-This project uses the **Gold Price 10 Years (2013-2023)** dataset from Kaggle:
-- **Source**: [Kaggle - Gold Price Dataset](https://www.kaggle.com/datasets/farzadnekouei/gold-price-10-years-20132023)
-- **Time Period**: 2013-2023 (10 years of historical gold price data)
-- **Format**: CSV with historical gold price records
-- **Location**: `backend/LSTM/Gold Price (2013-2023).csv`
+This project includes **3 different gold price datasets**:
 
-The dataset contains daily gold price information spanning a decade, providing comprehensive historical context for training the LSTM model and testing predictions with real-world market data.
+### 1. **Primary Training Dataset (2015–2025)** ⭐ PRODUCTION
+- **Source**: Investing.com – Gold Historical Data (manual export)
+- **Link**: https://www.investing.com/commodities/gold-historical-data
+- **Time Period**: 2015–2025 (10 years of historical gold price data)
+- **Format**: CSV with columns `Date`, `Price`
+- **Location**: `backend/LSTM/Gold(2015-2025).csv`
+- **Status**: ✅ **Currently used**
+- **Use Case**: Production model training and inference
+
+---
+
+### 2. **Testing Dataset (2013–2023)** 🧪 TEST / RETRAIN
+- **Source**: Kaggle – Gold Price 10 Years
+- **Link**: https://www.kaggle.com/datasets/farzadnekouei/gold-price-10-years-20132023
+- **Time Period**: 2013–2023
+- **Format**: CSV with daily gold price records
+- **Location**: `backend/LSTM/Gold Price (2013-2023).csv`
+- **Use Case**: Model evaluation, retraining experiments
+
+---
+
+### 3. **Gold Futures Dataset** 🧪 TEST / RETRAIN
+- **Source**: Investing.com – Gold Futures Historical Data
+- **Link**: https://www.investing.com/commodities/gold-historical-data
+- **Format**: CSV with columns `Date`, `Price`, `Open`, `High`, `Low`, `Vol.`, `Change %`
+- **Location**: `backend/LSTM/Gold Futures Historical Data.csv`
+- **Use Case**: Testing model robustness with futures market data
+### 📥 Expected CSV Format for Upload
+Minimum required columns:
+```csv
+Date,Price
+2025-01-01,1800.50
+2025-01-02,1805.25
+2025-01-03,1802.75
+```
+
+**Requirements:**
+- **Date Column**: YYYY-MM-DD format (or MM/DD/YYYY)
+- **Price Column**: Numerical values (gold prices)
+- **Minimum Data**: At least 180 rows recommended for LSTM
 
 ---
 
@@ -91,24 +128,30 @@ goldpriceai-predictor/
 │   ├── artifacts/
 │   │   └── lstm_gold.h5                # Pre-trained LSTM model
 │   └── LSTM/
-│       ├── Gold Price (2013-2023).csv  # Training data
-│       └── gold-price-prediction-lstm-96-accuracy.ipynb
+│       ├── Gold(2015-2025).csv                    # ⭐ PRIMARY - Training data (Investing.com)
+│       ├── Gold Price (2013-2023).csv             # 🧪 TEST/RETRAIN - Kaggle dataset
+│       ├── Gold Futures Historical Data.csv       # 🧪 TEST/RETRAIN - Futures data (Investing.com)
+│       ├── lstm_gold.h5                           # Original trained model
+│       ├── scaler.pkl                             # Data scaler for preprocessing
+│       ├── gold-price-prediction-lstm-96-accuracy.ipynb
+│       └── gold-price-prediction-lstm-fixed.ipynb
 │
 ├── frontend/
-│   ├── src/
-│   │   ├── App.tsx                     # Main application component
-│   │   ├── index.tsx                   # Entry point
-│   │   ├── types.ts                    # TypeScript types
-│   │   ├── services/
-│   │   │   ├── predictService.ts       # Backend API client
-│   │   │   └── geminiService.ts        # Google Gemini API integration
-│   │   └── utils/
-│   │       └── greyModel.ts            # GM(1,1) implementation
+│   ├── App.tsx                         # Main application component
+│   ├── index.tsx                       # Entry point
+│   ├── types.ts                        # TypeScript types
 │   ├── index.html                      # HTML template
+│   ├── metadata.json                   # Application metadata
 │   ├── package.json                    # Node.js dependencies
 │   ├── tsconfig.json                   # TypeScript configuration
 │   ├── vite.config.ts                  # Vite build configuration
-│   └── vite-env.d.ts                   # Vite types
+│   ├── vite-env.d.ts                   # Vite types
+│   ├── services/
+│   │   ├── predictService.ts           # Backend API client
+│   │   ├── geminiService.ts            # Google Gemini API integration
+│   │   └── trainService.ts             # Model retraining service
+│   └── utils/
+│       └── greyModel.ts                # GM(1,1) implementation
 │
 └── README.md                           # This file
 ```
@@ -218,6 +261,76 @@ Update the API base URL in `frontend/services/predictService.ts` if running on d
 }
 ```
 
+### LSTM Model Retraining
+**POST** `/train/lstm`
+
+**Request:**
+- `file`: CSV file with historical gold price data
+- `date_col`: Column name for dates (default: "Date")
+- `price_col`: Column name for prices (default: "Price")
+- `window_size`: Sequence window size (default: 60)
+- `test_year`: Year to use for testing (default: 2022)
+- `epochs`: Number of training epochs (default: 20)
+- `batch_size`: Batch size (default: 32)
+- `lstm_units`: LSTM units (default: 50)
+- `dropout`: Dropout rate (default: 0.2)
+- `learning_rate`: Learning rate (default: 0.001)
+
+**Response:**
+```json
+{
+  "loss": 0.0015,
+  "val_loss": 0.0025,
+  "train_size": 2000,
+  "test_size": 150,
+  "mape": 2.45
+}
+```
+
+**⚠️ Important - Model File Locations:**
+
+When you retrain the model, only certain files are updated:
+
+| Location | File | Status After Retrain |
+|----------|------|----------------------|
+| `backend/artifacts/` | `lstm_gold.h5` | ✅ **UPDATED** |
+| `backend/artifacts/` | `scaler.pkl` | ✅ **UPDATED** |
+| `backend/LSTM/` | `lstm_gold.h5` | 🔒 **UNCHANGED** (Original) |
+| `backend/temp/` | `lstm_gold.h5` | 🔒 **UNCHANGED** |
+
+**🛡️ How to Backup and Restore:**
+
+```bash
+# Before retraining - backup current model
+cp backend/artifacts/lstm_gold.h5 backend/artifacts/lstm_gold_backup.h5
+cp backend/artifacts/scaler.pkl backend/artifacts/scaler_backup.pkl
+
+# If retrain goes wrong - restore backup
+cp backend/artifacts/lstm_gold_backup.h5 backend/artifacts/lstm_gold.h5
+cp backend/artifacts/scaler_backup.pkl backend/artifacts/scaler.pkl
+
+# Or restore from original in LSTM folder
+cp backend/LSTM/lstm_gold.h5 backend/artifacts/lstm_gold.h5
+```
+
+### Grey Model (GM(1,1)) Prediction
+**POST** `/predict/gm11`
+
+**Request:**
+- `file`: CSV file with historical data
+- `date_col`: Column name for dates
+- `price_col`: Column name for prices
+- `forecast_steps`: Number of steps to forecast (default: 7)
+
+**Response:**
+```json
+{
+  "dates": ["2023-01-08", "2023-01-09", ...],
+  "predicted": [1800.5, 1805.2, ...],
+  "mape": 3.12
+}
+```
+
 ---
 
 ## 🧠 Models Overview
@@ -293,10 +406,10 @@ The application includes comprehensive error handling:
 
 - [ ] Support for multiple time-series models (ARIMA, Prophet)
 - [ ] Real-time data fetching from market APIs
-- [ ] Model retraining interface
 - [ ] Advanced statistical analysis
 - [ ] Export predictions to multiple formats
 - [ ] Price alert notifications
+- [ ] Model performance comparison dashboard
 
 ---
 
